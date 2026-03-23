@@ -1,0 +1,22 @@
+# Build output
+bin/
+obj/
+
+# User-specific files
+*.user
+*.rsuser
+*.suo
+
+# Local tool/runtime caches
+.dotnet/
+
+# App local settings and exports
+settings.json
+export/
+
+# IDE
+.vs/
+.vscode/
+
+# Publish artifacts
+publish/
