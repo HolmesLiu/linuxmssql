@@ -35,3 +35,5 @@ dotnet publish .\SqlServerExportTool\SqlServerExportTool.csproj -c Release -r wi
 - `SqlServerExportTool/`：桌面程序源码
 - `SqlServerExportTool/Models/`：配置与导出模型
 - `SqlServerExportTool/Services/`：数据库访问、导出、配置持久化
+
+# linuxmssql
