@@ -1,0 +1,6 @@
+@SqlServerTool.UbuntuService_HostAddress = http://localhost:5213
+
+GET {{SqlServerTool.UbuntuService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
