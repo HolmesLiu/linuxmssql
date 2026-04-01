@@ -45,6 +45,13 @@ public static class CliRunner
 
                     return 0;
                 }
+                case "daily-backup":
+                {
+                    DailyBackupRequest request = BuildDailyBackupRequest(options);
+                    DailyBackupResult result = await service.DailyBackupFromExcelAsync(request, cancellationToken);
+                    Console.WriteLine($"每日备份完成: {result.DayDirectory}, 全量表 {result.FullTableCount}, 增量表 {result.IncrementalTableCount}, 文件数 {result.CreatedFileCount}");
+                    return 0;
+                }
                 default:
                     PrintHelp();
                     return 1;
@@ -85,6 +92,20 @@ public static class CliRunner
             InputPath = GetRequired(options, "input"),
             Format = GetOptional(options, "format", "sql"),
             TargetTable = GetOptional(options, "target-table", string.Empty)
+        };
+    }
+
+    private static DailyBackupRequest BuildDailyBackupRequest(Dictionary<string, string> options)
+    {
+        return new DailyBackupRequest
+        {
+            ConnectionString = GetRequired(options, "connection"),
+            ExcelPath = GetRequired(options, "excel"),
+            OutputRootDirectory = GetRequired(options, "output-root"),
+            SheetName = GetOptional(options, "sheet", "sheet1"),
+            Format = GetOptional(options, "format", "json"),
+            IncrementalColumn = GetOptional(options, "incremental-column", string.Empty),
+            FilterDataType = GetOptional(options, "filter-type", "datetime")
         };
     }
 
@@ -139,5 +160,7 @@ public static class CliRunner
         Console.WriteLine("         [--filter-column CreatedAt] [--latest-count 100] [--range-start 2026-01-01] [--range-end 2026-01-31] [--filter-type datetime|number|text]");
         Console.WriteLine("  import --connection <conn> --input <file-or-dir> [--format sql|json|csv] [--target-table dbo.A]");
         Console.WriteLine("  tables --connection <conn>");
+        Console.WriteLine("  daily-backup --connection <conn> --excel <path.xlsx> --output-root <dir> [--sheet sheet1] [--format json|csv|sql]");
+        Console.WriteLine("              [--incremental-column UpdateTime] [--filter-type datetime|number|text]");
     }
 }

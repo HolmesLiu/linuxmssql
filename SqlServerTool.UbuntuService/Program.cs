@@ -54,4 +54,17 @@ app.MapPost("/api/tables", async (TableListRequest request, SqlTransferService s
     }
 });
 
+app.MapPost("/api/daily-backup", async (DailyBackupRequest request, SqlTransferService service, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        DailyBackupResult result = await service.DailyBackupFromExcelAsync(request, cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+});
+
 app.Run();
