@@ -1,0 +1,22 @@
+﻿表名,内容说明,分类说明
+tb_BCPTestList_Main,存放检测单信息,半成品检测记录
+tb_BCPTestList_Detail,存放与上表对应的检测项目信息,半成品检测记录
+tb_Premix_send_list,预混料送检单,预混料送检
+tb_Premix_send_Detail,预混料送检项目表,预混料送检
+tb_Premix_Test_Main,存放检测单信息,预混料检测记录
+tb_Premix_Test_Detail,预混料检测项目表,预混料检测记录
+tb_TestList_Detail,存放检测单对应的检测项目信息,外来样检测记录
+tb_TestList_Main,存放检测单信息,外来样检测记录
+tb_Send_List,原辅料、成品送检单,"原辅料送检
+成品送检"
+tb_Send_List_Image,送检上传的图片,"原辅料送检
+成品送检"
+tb_Test_Main,存放检测单信息,"原辅料检测记录
+成品检测记录"
+tb_Test_Detail,原辅料、成品 检测项目表,"原辅料检测记录
+成品检测记录"
+tb_Test_Files,检测上传的文件,"原辅料检测记录
+成品检测记录"
+tb_JYD_Send_List,均匀度送检单表,均匀度送检单
+tb_JYD_Test_Main,存放检测单信息,均匀度检测记录
+tb_JYD_Test_Detail,均匀度检测记录子表，存对应的项目,均匀度检测记录
