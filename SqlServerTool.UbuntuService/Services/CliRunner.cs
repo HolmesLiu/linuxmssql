@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+ï»¿using Microsoft.Extensions.DependencyInjection;
 using SqlServerTool.UbuntuService.Models;
 
 namespace SqlServerTool.UbuntuService.Services;
@@ -24,14 +24,14 @@ public static class CliRunner
                 {
                     ExportRequest request = BuildExportRequest(options);
                     ExportResult result = await service.ExportAsync(request, cancellationToken);
-                    Console.WriteLine($"µ¼³öÍê³É: {result.BatchDirectory}, ÎÄ¼şÊı: {result.FileCount}");
+                    Console.WriteLine($"å¯¼å‡ºå®Œæˆ: {result.BatchDirectory}, æ–‡ä»¶æ•°: {result.FileCount}");
                     return 0;
                 }
                 case "import":
                 {
                     ImportRequest request = BuildImportRequest(options);
                     ImportResult result = await service.ImportAsync(request, cancellationToken);
-                    Console.WriteLine($"µ¼ÈëÍê³É: Ó°ÏìĞĞÊı {result.AffectedRows}");
+                    Console.WriteLine($"å¯¼å…¥å®Œæˆ: å½±å“è¡Œæ•° {result.AffectedRows}");
                     return 0;
                 }
                 case "tables":
@@ -49,7 +49,7 @@ public static class CliRunner
                 {
                     DailyBackupRequest request = BuildDailyBackupRequest(options);
                     DailyBackupResult result = await service.DailyBackupFromExcelAsync(request, cancellationToken);
-                    Console.WriteLine($"Ã¿ÈÕ±¸·İÍê³É: {result.DayDirectory}, È«Á¿±í {result.FullTableCount}, ÔöÁ¿±í {result.IncrementalTableCount}, ÎÄ¼şÊı {result.CreatedFileCount}");
+                    Console.WriteLine($"æ¯æ—¥å¤‡ä»½å®Œæˆ: {result.DayDirectory}, å…¨é‡è¡¨ {result.FullTableCount}, å¢é‡è¡¨ {result.IncrementalTableCount}, æ–‡ä»¶æ•° {result.CreatedFileCount}, æ±‡æ€»æ–‡ä»¶: {result.SummaryFilePath}");
                     return 0;
                 }
                 default:
@@ -59,7 +59,7 @@ public static class CliRunner
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Ö´ĞĞÊ§°Ü: {ex.Message}");
+            Console.Error.WriteLine($"æ‰§è¡Œå¤±è´¥: {ex.Message}");
             return 2;
         }
     }
@@ -123,7 +123,7 @@ public static class CliRunner
 
             if (index + 1 >= args.Length)
             {
-                throw new InvalidOperationException($"È±ÉÙ²ÎÊıÖµ: {key}");
+                throw new InvalidOperationException($"ç¼ºå°‘å‚æ•°å€¼: {key}");
             }
 
             options[key[2..]] = args[index + 1];
@@ -137,7 +137,7 @@ public static class CliRunner
     {
         if (!options.TryGetValue(key, out string? value) || string.IsNullOrWhiteSpace(value))
         {
-            throw new InvalidOperationException($"È±ÉÙ±ØÌî²ÎÊı: --{key}");
+            throw new InvalidOperationException($"ç¼ºå°‘å¿…å¡«å‚æ•°: --{key}");
         }
 
         return value;
@@ -155,7 +155,7 @@ public static class CliRunner
 
     private static void PrintHelp()
     {
-        Console.WriteLine("ÓÃ·¨:");
+        Console.WriteLine("ç”¨æ³•:");
         Console.WriteLine("  export --connection <conn> --output <dir> [--format sql|json|csv] [--mode all|latest|range] [--tables dbo.A,dbo.B]");
         Console.WriteLine("         [--filter-column CreatedAt] [--latest-count 100] [--range-start 2026-01-01] [--range-end 2026-01-31] [--filter-type datetime|number|text]");
         Console.WriteLine("  import --connection <conn> --input <file-or-dir> [--format sql|json|csv] [--target-table dbo.A]");

@@ -1,8 +1,10 @@
-namespace SqlServerTool.UbuntuService.Models;
+﻿namespace SqlServerTool.UbuntuService.Models;
 
 public sealed class DailyBackupResult
 {
     public required string DayDirectory { get; init; }
+
+    public required string SummaryFilePath { get; init; }
 
     public required int FullTableCount { get; init; }
 

@@ -1,4 +1,4 @@
-using System.Data;
+Ôªøusing System.Data;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -15,10 +15,10 @@ public sealed partial class SqlTransferService
     {
         ValidateDailyBackupRequest(request);
 
-        List<string> tables = LoadTablesFromExcel(request.ExcelPath, request.SheetName);
+        List<TableDefinition> tables = LoadTablesFromExcel(request.ExcelPath, request.SheetName);
         if (tables.Count == 0)
         {
-            throw new InvalidOperationException("Excel ÷–Œ¥ ∂±µΩ±Ì√˚£®A¡––Ë « tb_ ø™Õ∑£©°£");
+            throw new InvalidOperationException("Excel ‰∏≠Êú™ËØÜÂà´Âà∞Ë°®ÂêçÔºàAÂàóÈúÄÊòØ tb_ ÂºÄÂ§¥Ôºâ„ÄÇ");
         }
 
         Directory.CreateDirectory(request.OutputRootDirectory);
@@ -31,15 +31,16 @@ public sealed partial class SqlTransferService
         int fullCount = 0;
         int incrCount = 0;
         int fileCount = 0;
+        List<DailySummaryRow> summaryRows = [];
 
         await using SqlConnection connection = new(request.ConnectionString);
         await connection.OpenAsync(cancellationToken);
 
-        foreach (string table in tables)
+        foreach (TableDefinition tableDef in tables)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            (string schemaName, string tableName) = ParseTableName(table);
+            (string schemaName, string tableName) = ParseTableName(tableDef.TableName);
             string tableKey = $"{schemaName}.{tableName}";
             List<ColumnInfo> columns = await GetColumnsAsync(connection, schemaName, tableName, cancellationToken);
             if (columns.Count == 0)
@@ -57,10 +58,10 @@ public sealed partial class SqlTransferService
                 ? await LoadAllRowsAsync(connection, schemaName, tableName, cancellationToken)
                 : await LoadIncrementalRowsAsync(connection, schemaName, tableName, incrColumn, tableState.Watermark, columns, request.FilterDataType, cancellationToken);
 
+            string modeTag = isFull ? "FULL" : "INCR";
+            string prefix = $"{DateTime.Now:HHmmss}_{modeTag}_{schemaName}.{tableName}";
             if (data.Rows.Count > 0 || isFull)
             {
-                string modeTag = isFull ? "FULL" : "INCR";
-                string prefix = $"{DateTime.Now:HHmmss}_{modeTag}_{schemaName}.{tableName}";
                 fileCount += await WriteByFormatAsync(dayDirectory, prefix, schemaName, tableName, data, request.Format, cancellationToken);
             }
 
@@ -79,13 +80,27 @@ public sealed partial class SqlTransferService
             state.Tables[tableKey] = tableState;
 
             if (isFull) fullCount++; else incrCount++;
+
+            summaryRows.Add(new DailySummaryRow
+            {
+                TableName = $"{schemaName}.{tableName}",
+                Description = tableDef.Description,
+                Category = tableDef.Category,
+                Mode = isFull ? "ÂÖ®Èáè" : "Â¢ûÈáè",
+                RowCount = data.Rows.Count,
+                IncrementalColumn = incrColumn,
+                Watermark = tableState.Watermark ?? string.Empty,
+                FilePrefix = prefix
+            });
         }
 
         await SaveDailyBackupStateAsync(statePath, state, cancellationToken);
+        string summaryPath = await WriteDailySummaryFileAsync(dayDirectory, summaryRows, cancellationToken);
 
         return new DailyBackupResult
         {
             DayDirectory = dayDirectory,
+            SummaryFilePath = summaryPath,
             FullTableCount = fullCount,
             IncrementalTableCount = incrCount,
             CreatedFileCount = fileCount
@@ -96,23 +111,23 @@ public sealed partial class SqlTransferService
     {
         if (string.IsNullOrWhiteSpace(request.ConnectionString))
         {
-            throw new InvalidOperationException("ConnectionString ≤ªƒ‹Œ™ø’°£");
+            throw new InvalidOperationException("ConnectionString ‰∏çËÉΩ‰∏∫Á©∫„ÄÇ");
         }
 
         if (string.IsNullOrWhiteSpace(request.ExcelPath) || !File.Exists(request.ExcelPath))
         {
-            throw new InvalidOperationException("ExcelPath Œﬁ–ßªÚŒƒº˛≤ª¥Ê‘⁄°£");
+            throw new InvalidOperationException("ExcelPath Êó†ÊïàÊàñÊñá‰ª∂‰∏çÂ≠òÂú®„ÄÇ");
         }
 
         if (string.IsNullOrWhiteSpace(request.OutputRootDirectory))
         {
-            throw new InvalidOperationException("OutputRootDirectory ≤ªƒ‹Œ™ø’°£");
+            throw new InvalidOperationException("OutputRootDirectory ‰∏çËÉΩ‰∏∫Á©∫„ÄÇ");
         }
 
         string format = request.Format.ToLowerInvariant();
         if (format is not ("sql" or "json" or "csv"))
         {
-            throw new InvalidOperationException("Format Ωˆ÷ß≥÷ sql/json/csv°£");
+            throw new InvalidOperationException("Format ‰ªÖÊîØÊåÅ sql/json/csv„ÄÇ");
         }
     }
 

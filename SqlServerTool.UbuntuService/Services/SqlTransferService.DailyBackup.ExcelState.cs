@@ -1,22 +1,19 @@
-using System.Data;
-using System.Globalization;
+Ôªøusing System.Globalization;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Xml;
-using Microsoft.Data.SqlClient;
-using SqlServerTool.UbuntuService.Models;
 
 namespace SqlServerTool.UbuntuService.Services;
 
 public sealed partial class SqlTransferService
 {
-    private static List<string> LoadTablesFromExcel(string excelPath, string sheetName)
+    private static List<TableDefinition> LoadTablesFromExcel(string excelPath, string sheetName)
     {
         using ZipArchive zip = ZipFile.OpenRead(excelPath);
         List<string> shared = LoadSharedStrings(zip);
         string sheetPath = ResolveSheetPath(zip, sheetName);
-        ZipArchiveEntry sheetEntry = zip.GetEntry(sheetPath) ?? throw new InvalidOperationException($"’“≤ªµΩπ§◊˜±Ì: {sheetPath}");
+        ZipArchiveEntry sheetEntry = zip.GetEntry(sheetPath) ?? throw new InvalidOperationException($"Êâæ‰∏çÂà∞Â∑•‰ΩúË°®: {sheetPath}");
 
         XmlDocument doc = new();
         using (Stream stream = sheetEntry.Open()) { doc.Load(stream); }
@@ -24,23 +21,39 @@ public sealed partial class SqlTransferService
         XmlNamespaceManager nsmgr = new(doc.NameTable);
         nsmgr.AddNamespace("m", "http://schemas.openxmlformats.org/spreadsheetml/2006/main");
 
-        List<string> tables = [];
+        Dictionary<string, TableDefinition> tables = new(StringComparer.OrdinalIgnoreCase);
         XmlNodeList? rows = doc.SelectNodes("//m:sheetData/m:row", nsmgr);
-        if (rows is null) return tables;
+        if (rows is null) return [];
 
         foreach (XmlNode row in rows)
         {
             XmlNode? cellA = row.SelectSingleNode("m:c[starts-with(@r,'A')]", nsmgr);
             if (cellA is null) continue;
 
-            string text = ResolveCellText(cellA, shared, nsmgr);
-            if (!string.IsNullOrWhiteSpace(text) && text.StartsWith("tb_", StringComparison.OrdinalIgnoreCase))
+            string tableName = ResolveCellText(cellA, shared, nsmgr).Trim();
+            if (!tableName.StartsWith("tb_", StringComparison.OrdinalIgnoreCase))
             {
-                tables.Add(text.Trim());
+                continue;
+            }
+
+            XmlNode? cellB = row.SelectSingleNode("m:c[starts-with(@r,'B')]", nsmgr);
+            XmlNode? cellC = row.SelectSingleNode("m:c[starts-with(@r,'C')]", nsmgr);
+
+            string description = cellB is null ? string.Empty : ResolveCellText(cellB, shared, nsmgr).Trim();
+            string category = cellC is null ? string.Empty : ResolveCellText(cellC, shared, nsmgr).Trim();
+
+            if (!tables.ContainsKey(tableName))
+            {
+                tables[tableName] = new TableDefinition
+                {
+                    TableName = tableName,
+                    Description = description,
+                    Category = category
+                };
             }
         }
 
-        return tables.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return tables.Values.ToList();
     }
 
     private static List<string> LoadSharedStrings(ZipArchive zip)
@@ -73,7 +86,7 @@ public sealed partial class SqlTransferService
     private static string ResolveSheetPath(ZipArchive zip, string sheetName)
     {
         XmlDocument wb = new();
-        using (Stream stream = (zip.GetEntry("xl/workbook.xml") ?? throw new InvalidOperationException("»±…Ÿ workbook.xml")).Open()) { wb.Load(stream); }
+        using (Stream stream = (zip.GetEntry("xl/workbook.xml") ?? throw new InvalidOperationException("Áº∫Â∞ë workbook.xml")).Open()) { wb.Load(stream); }
 
         XmlNamespaceManager nsmgr = new(wb.NameTable);
         nsmgr.AddNamespace("m", "http://schemas.openxmlformats.org/spreadsheetml/2006/main");
@@ -81,22 +94,22 @@ public sealed partial class SqlTransferService
 
         XmlNode? sheet = wb.SelectSingleNode($"//m:sheets/m:sheet[translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')='{sheetName.ToLowerInvariant()}']", nsmgr)
             ?? wb.SelectSingleNode("//m:sheets/m:sheet", nsmgr)
-            ?? throw new InvalidOperationException("Excel ÷–√ª”–π§◊˜±Ì°£");
+            ?? throw new InvalidOperationException("Excel ‰∏≠Ê≤°ÊúâÂ∑•‰ΩúË°®„ÄÇ");
 
         string relationId = sheet.Attributes?["id", "http://schemas.openxmlformats.org/officeDocument/2006/relationships"]?.Value
-            ?? throw new InvalidOperationException("π§◊˜±ÌπÿœµID»± ß°£");
+            ?? throw new InvalidOperationException("Â∑•‰ΩúË°®ÂÖ≥Á≥ªIDÁº∫Â§±„ÄÇ");
 
         XmlDocument rel = new();
-        using (Stream stream = (zip.GetEntry("xl/_rels/workbook.xml.rels") ?? throw new InvalidOperationException("»±…Ÿ workbook.xml.rels")).Open()) { rel.Load(stream); }
+        using (Stream stream = (zip.GetEntry("xl/_rels/workbook.xml.rels") ?? throw new InvalidOperationException("Áº∫Â∞ë workbook.xml.rels")).Open()) { rel.Load(stream); }
 
         XmlNamespaceManager rmgr = new(rel.NameTable);
         rmgr.AddNamespace("p", "http://schemas.openxmlformats.org/package/2006/relationships");
 
         XmlNode? relNode = rel.SelectSingleNode($"//p:Relationship[@Id='{relationId}']", rmgr)
             ?? rel.SelectSingleNode($"//Relationship[@Id='{relationId}']")
-            ?? throw new InvalidOperationException("’“≤ªµΩπ§◊˜±Ìπÿœµ°£");
+            ?? throw new InvalidOperationException("Êâæ‰∏çÂà∞Â∑•‰ΩúË°®ÂÖ≥Á≥ª„ÄÇ");
 
-        string target = relNode.Attributes?["Target"]?.Value ?? throw new InvalidOperationException("π§◊˜±ÌπÿœµTarget»± ß°£");
+        string target = relNode.Attributes?["Target"]?.Value ?? throw new InvalidOperationException("Â∑•‰ΩúË°®ÂÖ≥Á≥ªTargetÁº∫Â§±„ÄÇ");
         return target.StartsWith("xl/", StringComparison.OrdinalIgnoreCase) ? target : $"xl/{target.TrimStart('/')}";
     }
 
@@ -135,5 +148,62 @@ public sealed partial class SqlTransferService
             DateTime dt => dt.ToString("O", CultureInfo.InvariantCulture),
             _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
         };
+    }
+
+    private static async Task<string> WriteDailySummaryFileAsync(string dayDirectory, IReadOnlyList<DailySummaryRow> rows, CancellationToken cancellationToken)
+    {
+        string path = Path.Combine(dayDirectory, $"Â§á‰ªΩÊ±áÊÄª_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+        StringBuilder sb = new();
+        sb.AppendLine("Ë°®Âêç,ÂÜÖÂÆπËØ¥Êòé,ÂàÜÁ±ªËØ¥Êòé,Êú¨Ê¨°Ê®°Âºè,Êú¨Ê¨°Â§á‰ªΩÊù°Êï∞,Â¢ûÈáèÂ≠óÊÆµ,ÂΩìÂâçÊ∞¥‰Ωç,ÁîüÊàêÊñá‰ª∂ÂâçÁºÄ");
+
+        foreach (DailySummaryRow row in rows)
+        {
+            sb.AppendLine(string.Join(",",
+                EscapeCsvCell(row.TableName),
+                EscapeCsvCell(row.Description),
+                EscapeCsvCell(row.Category),
+                EscapeCsvCell(row.Mode),
+                row.RowCount.ToString(CultureInfo.InvariantCulture),
+                EscapeCsvCell(row.IncrementalColumn),
+                EscapeCsvCell(row.Watermark),
+                EscapeCsvCell(row.FilePrefix)));
+        }
+
+        await File.WriteAllTextAsync(path, sb.ToString(), new UTF8Encoding(false), cancellationToken);
+        return path;
+    }
+
+    private static string EscapeCsvCell(string value)
+    {
+        string escaped = (value ?? string.Empty).Replace("\"", "\"\"", StringComparison.Ordinal);
+        return $"\"{escaped}\"";
+    }
+
+    private sealed class TableDefinition
+    {
+        public required string TableName { get; init; }
+
+        public string Description { get; init; } = string.Empty;
+
+        public string Category { get; init; } = string.Empty;
+    }
+
+    private sealed class DailySummaryRow
+    {
+        public required string TableName { get; init; }
+
+        public required string Description { get; init; }
+
+        public required string Category { get; init; }
+
+        public required string Mode { get; init; }
+
+        public required int RowCount { get; init; }
+
+        public required string IncrementalColumn { get; init; }
+
+        public required string Watermark { get; init; }
+
+        public required string FilePrefix { get; init; }
     }
 }
