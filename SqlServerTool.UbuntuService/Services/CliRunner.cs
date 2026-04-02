@@ -48,6 +48,7 @@ public static class CliRunner
                 case "daily-backup":
                 {
                     DailyBackupRequest request = BuildDailyBackupRequest(options);
+                    Console.WriteLine($"开始每日备份: Excel={request.ExcelPath}, Sheet={request.SheetName}, 输出目录={request.OutputRootDirectory}");
                     DailyBackupResult result = await service.DailyBackupFromExcelAsync(request, cancellationToken);
                     Console.WriteLine($"每日备份完成: {result.DayDirectory}, 全量表 {result.FullTableCount}, 增量表 {result.IncrementalTableCount}, 文件数 {result.CreatedFileCount}, 汇总文件: {result.SummaryFilePath}");
                     return 0;

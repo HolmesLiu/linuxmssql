@@ -27,12 +27,25 @@ public sealed partial class SqlTransferService
 
         foreach (XmlNode row in rows)
         {
+            string rowRef = row.Attributes?["r"]?.Value ?? "?";
             XmlNode? cellA = row.SelectSingleNode("m:c[starts-with(@r,'A')]", nsmgr);
-            if (cellA is null) continue;
-
-            string tableName = ResolveCellText(cellA, shared, nsmgr).Trim();
-            if (!tableName.StartsWith("tb_", StringComparison.OrdinalIgnoreCase))
+            if (cellA is null)
             {
+                Console.WriteLine($"[daily-backup] 跳过 Excel 第 {rowRef} 行: A列为空。");
+                continue;
+            }
+
+            string rawTableName = ResolveCellText(cellA, shared, nsmgr).Trim();
+            if (string.IsNullOrWhiteSpace(rawTableName))
+            {
+                Console.WriteLine($"[daily-backup] 跳过 Excel 第 {rowRef} 行: A列为空。");
+                continue;
+            }
+
+            string tableName = NormalizeExcelTableName(rawTableName);
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                Console.WriteLine($"[daily-backup] 跳过 Excel 第 {rowRef} 行: 表名 '{rawTableName}' 无效。");
                 continue;
             }
 
@@ -42,18 +55,40 @@ public sealed partial class SqlTransferService
             string description = cellB is null ? string.Empty : ResolveCellText(cellB, shared, nsmgr).Trim();
             string category = cellC is null ? string.Empty : ResolveCellText(cellC, shared, nsmgr).Trim();
 
-            if (!tables.ContainsKey(tableName))
+            if (tables.ContainsKey(tableName))
             {
-                tables[tableName] = new TableDefinition
-                {
-                    TableName = tableName,
-                    Description = description,
-                    Category = category
-                };
+                Console.WriteLine($"[daily-backup] 跳过 Excel 第 {rowRef} 行: 表 '{tableName}' 重复。");
+                continue;
             }
+
+            tables[tableName] = new TableDefinition
+            {
+                TableName = tableName,
+                Description = description,
+                Category = category
+            };
+
+            Console.WriteLine($"[daily-backup] 识别 Excel 第 {rowRef} 行表: {tableName}");
         }
 
+        Console.WriteLine($"[daily-backup] Excel 共识别 {tables.Count} 个表。");
         return tables.Values.ToList();
+    }
+
+    private static string NormalizeExcelTableName(string tableName)
+    {
+        string normalized = tableName.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        if (normalized.Contains(' '))
+        {
+            return string.Empty;
+        }
+
+        return normalized;
     }
 
     private static List<string> LoadSharedStrings(ZipArchive zip)

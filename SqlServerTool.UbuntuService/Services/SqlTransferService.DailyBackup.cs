@@ -18,8 +18,10 @@ public sealed partial class SqlTransferService
         List<TableDefinition> tables = LoadTablesFromExcel(request.ExcelPath, request.SheetName);
         if (tables.Count == 0)
         {
-            throw new InvalidOperationException("Excel 中未识别到表名（A列需是 tb_ 开头）。");
+            throw new InvalidOperationException("Excel 中未识别到有效表名（A列需填写表名）。");
         }
+
+        Console.WriteLine($"[daily-backup] 开始处理 {tables.Count} 个 Excel 表。");
 
         Directory.CreateDirectory(request.OutputRootDirectory);
         string dayDirectory = Path.Combine(request.OutputRootDirectory, DateTime.Now.ToString("yyyy-MM-dd"));
@@ -45,8 +47,11 @@ public sealed partial class SqlTransferService
             List<ColumnInfo> columns = await GetColumnsAsync(connection, schemaName, tableName, cancellationToken);
             if (columns.Count == 0)
             {
+                Console.WriteLine($"[daily-backup] 跳过表 {tableKey}: 数据库中不存在或无可读取列。");
                 continue;
             }
+
+            Console.WriteLine($"[daily-backup] 开始处理表 {tableKey}。");
 
             state.Tables.TryGetValue(tableKey, out TableBackupState? tableState);
             tableState ??= new TableBackupState();
@@ -63,6 +68,11 @@ public sealed partial class SqlTransferService
             if (data.Rows.Count > 0 || isFull)
             {
                 fileCount += await WriteByFormatAsync(dayDirectory, prefix, schemaName, tableName, data, request.Format, cancellationToken);
+                Console.WriteLine($"[daily-backup] 表 {tableKey} 已导出，模式 {(isFull ? "FULL" : "INCR")}，行数 {data.Rows.Count}。");
+            }
+            else
+            {
+                Console.WriteLine($"[daily-backup] 表 {tableKey} 本次无增量数据，未生成文件。");
             }
 
             if (!string.IsNullOrWhiteSpace(incrColumn))
