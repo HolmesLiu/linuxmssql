@@ -63,6 +63,12 @@ public sealed partial class SqlTransferService
         return table;
     }
 
+    private static bool IsTimeColumn(ColumnInfo column)
+    {
+        string sqlType = column.SqlType.ToLowerInvariant();
+        return sqlType.Contains("date", StringComparison.Ordinal) || sqlType.Contains("time", StringComparison.Ordinal);
+    }
+
     private static object ParseWatermark(string watermark, string sqlType, string fallbackType)
     {
         string t = sqlType.ToLowerInvariant();
@@ -132,5 +138,7 @@ public sealed partial class SqlTransferService
         public DateTime LastBackupUtc { get; set; }
 
         public string LastMode { get; set; } = string.Empty;
+
+        public bool TrackRowUpdates { get; set; }
     }
 }

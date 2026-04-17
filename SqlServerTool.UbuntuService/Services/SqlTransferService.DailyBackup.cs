@@ -56,7 +56,13 @@ public sealed partial class SqlTransferService
             state.Tables.TryGetValue(tableKey, out TableBackupState? tableState);
             tableState ??= new TableBackupState();
 
-            string incrColumn = ResolveIncrementalColumn(request, tableState, columns);
+            string notes = string.Empty;
+            string incrColumn = ResolveIncrementalColumn(request, tableDef, tableState, columns, ref notes);
+            if (!string.IsNullOrWhiteSpace(notes))
+            {
+                Console.WriteLine($"[daily-backup] 表 {tableKey}: {notes}");
+            }
+
             bool isFull = string.IsNullOrWhiteSpace(incrColumn) || string.IsNullOrWhiteSpace(tableState.Watermark);
 
             DataTable data = isFull
@@ -87,6 +93,7 @@ public sealed partial class SqlTransferService
             tableState.IncrementalColumn = incrColumn;
             tableState.LastBackupUtc = DateTime.UtcNow;
             tableState.LastMode = isFull ? "FULL" : "INCR";
+            tableState.TrackRowUpdates = tableDef.TrackRowUpdates;
             state.Tables[tableKey] = tableState;
 
             if (isFull) fullCount++; else incrCount++;
@@ -96,7 +103,9 @@ public sealed partial class SqlTransferService
                 TableName = $"{schemaName}.{tableName}",
                 Description = tableDef.Description,
                 Category = tableDef.Category,
+                TrackRowUpdates = tableDef.TrackRowUpdates,
                 Mode = isFull ? "全量" : "增量",
+                Notes = notes,
                 RowCount = data.Rows.Count,
                 IncrementalColumn = incrColumn,
                 Watermark = tableState.Watermark ?? string.Empty,
@@ -141,8 +150,25 @@ public sealed partial class SqlTransferService
         }
     }
 
-    private static string ResolveIncrementalColumn(DailyBackupRequest request, TableBackupState tableState, IReadOnlyList<ColumnInfo> columns)
+    private static string ResolveIncrementalColumn(DailyBackupRequest request, TableDefinition tableDefinition, TableBackupState tableState, IReadOnlyList<ColumnInfo> columns, ref string notes)
     {
+        if (tableDefinition.TrackRowUpdates)
+        {
+            string rowUpdateColumn = ResolveRowUpdateColumn(columns);
+            if (!string.IsNullOrWhiteSpace(rowUpdateColumn))
+            {
+                if (!string.IsNullOrWhiteSpace(request.IncrementalColumn) && !rowUpdateColumn.Equals(request.IncrementalColumn, StringComparison.OrdinalIgnoreCase))
+                {
+                    notes = $"已启用存量行更新，忽略全局增量字段 {request.IncrementalColumn}，改用表内更新时间字段 {rowUpdateColumn}。";
+                }
+
+                return rowUpdateColumn;
+            }
+
+            notes = "已启用存量行更新，但未识别到可用时间字段，本次退回全量导出。";
+            return string.Empty;
+        }
+
         if (!string.IsNullOrWhiteSpace(request.IncrementalColumn) && columns.Any(c => c.Name.Equals(request.IncrementalColumn, StringComparison.OrdinalIgnoreCase)))
         {
             return request.IncrementalColumn;
@@ -164,5 +190,20 @@ public sealed partial class SqlTransferService
         }
 
         return columns.FirstOrDefault(c => c.IsIdentity)?.Name ?? string.Empty;
+    }
+
+    private static string ResolveRowUpdateColumn(IReadOnlyList<ColumnInfo> columns)
+    {
+        string[] updateCandidates = ["UpdateTime", "UpdatedAt", "ModifyTime", "ModifiedAt", "LastUpdateTime", "LastUpdatedAt", "EditTime", "ModifiedOn", "UpdateDate"];
+        foreach (string candidate in updateCandidates)
+        {
+            ColumnInfo? match = columns.FirstOrDefault(c => c.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase) && IsTimeColumn(c));
+            if (match is not null)
+            {
+                return match.Name;
+            }
+        }
+
+        return string.Empty;
     }
 }

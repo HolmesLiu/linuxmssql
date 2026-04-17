@@ -51,9 +51,11 @@ public sealed partial class SqlTransferService
 
             XmlNode? cellB = row.SelectSingleNode("m:c[starts-with(@r,'B')]", nsmgr);
             XmlNode? cellC = row.SelectSingleNode("m:c[starts-with(@r,'C')]", nsmgr);
+            XmlNode? cellD = row.SelectSingleNode("m:c[starts-with(@r,'D')]", nsmgr);
 
             string description = cellB is null ? string.Empty : ResolveCellText(cellB, shared, nsmgr).Trim();
             string category = cellC is null ? string.Empty : ResolveCellText(cellC, shared, nsmgr).Trim();
+            bool trackRowUpdates = cellD is not null && ParseExcelBoolean(ResolveCellText(cellD, shared, nsmgr));
 
             if (tables.ContainsKey(tableName))
             {
@@ -65,7 +67,8 @@ public sealed partial class SqlTransferService
             {
                 TableName = tableName,
                 Description = description,
-                Category = category
+                Category = category,
+                TrackRowUpdates = trackRowUpdates
             };
 
             Console.WriteLine($"[daily-backup] 识别 Excel 第 {rowRef} 行表: {tableName}");
@@ -162,6 +165,20 @@ public sealed partial class SqlTransferService
         return int.TryParse(raw, out int idx) && idx >= 0 && idx < shared.Count ? shared[idx] : string.Empty;
     }
 
+    private static bool ParseExcelBoolean(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "y" or "是" or "需要" => true,
+            _ => false
+        };
+    }
+
     private static async Task<DailyBackupState> LoadDailyBackupStateAsync(string statePath, CancellationToken cancellationToken)
     {
         if (!File.Exists(statePath)) return new DailyBackupState();
@@ -189,7 +206,7 @@ public sealed partial class SqlTransferService
     {
         string path = Path.Combine(dayDirectory, $"备份汇总_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
         StringBuilder sb = new();
-        sb.AppendLine("表名,内容说明,分类说明,本次模式,本次备份条数,增量字段,当前水位,生成文件前缀");
+        sb.AppendLine("表名,内容说明,分类说明,是否存量行更新,本次模式,备注,本次备份条数,增量字段,当前水位,生成文件前缀");
 
         foreach (DailySummaryRow row in rows)
         {
@@ -197,7 +214,9 @@ public sealed partial class SqlTransferService
                 EscapeCsvCell(row.TableName),
                 EscapeCsvCell(row.Description),
                 EscapeCsvCell(row.Category),
+                EscapeCsvCell(row.TrackRowUpdates ? "是" : "否"),
                 EscapeCsvCell(row.Mode),
+                EscapeCsvCell(row.Notes),
                 row.RowCount.ToString(CultureInfo.InvariantCulture),
                 EscapeCsvCell(row.IncrementalColumn),
                 EscapeCsvCell(row.Watermark),
@@ -221,6 +240,8 @@ public sealed partial class SqlTransferService
         public string Description { get; init; } = string.Empty;
 
         public string Category { get; init; } = string.Empty;
+
+        public bool TrackRowUpdates { get; init; }
     }
 
     private sealed class DailySummaryRow
@@ -231,7 +252,11 @@ public sealed partial class SqlTransferService
 
         public required string Category { get; init; }
 
+        public required bool TrackRowUpdates { get; init; }
+
         public required string Mode { get; init; }
+
+        public required string Notes { get; init; }
 
         public required int RowCount { get; init; }
 
