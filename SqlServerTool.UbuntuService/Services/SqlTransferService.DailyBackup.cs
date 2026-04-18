@@ -41,6 +41,7 @@ public sealed partial class SqlTransferService
         foreach (TableDefinition tableDef in tables)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            DateTime tableRunStartedUtc = DateTime.UtcNow;
 
             (string schemaName, string tableName) = ParseTableName(tableDef.TableName);
             string tableKey = $"{schemaName}.{tableName}";
@@ -57,17 +58,34 @@ public sealed partial class SqlTransferService
             tableState ??= new TableBackupState();
 
             string notes = string.Empty;
-            string incrColumn = ResolveIncrementalColumn(request, tableDef, tableState, columns, ref notes);
+            string incrColumn;
+            bool isFull;
+            DataTable data;
+
+            if (tableDef.TrackRowUpdates)
+            {
+                List<string> rowUpdateColumns = ResolveRowUpdateColumns(request, tableDef, tableState, columns, ref notes);
+                incrColumn = string.Join(";", rowUpdateColumns);
+                isFull = rowUpdateColumns.Count == 0 || tableState.LastBackupUtc == default;
+
+                data = isFull
+                    ? await LoadAllRowsAsync(connection, schemaName, tableName, cancellationToken)
+                    : await LoadIncrementalRowsByTimeColumnsAsync(connection, schemaName, tableName, rowUpdateColumns, tableState.LastBackupUtc, cancellationToken);
+            }
+            else
+            {
+                incrColumn = ResolveIncrementalColumn(request, tableState, columns);
+                isFull = string.IsNullOrWhiteSpace(incrColumn) || string.IsNullOrWhiteSpace(tableState.Watermark);
+
+                data = isFull
+                    ? await LoadAllRowsAsync(connection, schemaName, tableName, cancellationToken)
+                    : await LoadIncrementalRowsAsync(connection, schemaName, tableName, incrColumn, tableState.Watermark, columns, request.FilterDataType, cancellationToken);
+            }
+
             if (!string.IsNullOrWhiteSpace(notes))
             {
                 Console.WriteLine($"[daily-backup] 表 {tableKey}: {notes}");
             }
-
-            bool isFull = string.IsNullOrWhiteSpace(incrColumn) || string.IsNullOrWhiteSpace(tableState.Watermark);
-
-            DataTable data = isFull
-                ? await LoadAllRowsAsync(connection, schemaName, tableName, cancellationToken)
-                : await LoadIncrementalRowsAsync(connection, schemaName, tableName, incrColumn, tableState.Watermark, columns, request.FilterDataType, cancellationToken);
 
             string modeTag = isFull ? "FULL" : "INCR";
             string prefix = $"{DateTime.Now:HHmmss}_{modeTag}_{schemaName}.{tableName}";
@@ -81,7 +99,11 @@ public sealed partial class SqlTransferService
                 Console.WriteLine($"[daily-backup] 表 {tableKey} 本次无增量数据，未生成文件。");
             }
 
-            if (!string.IsNullOrWhiteSpace(incrColumn))
+            if (tableDef.TrackRowUpdates)
+            {
+                tableState.Watermark = tableRunStartedUtc.ToString("O", CultureInfo.InvariantCulture);
+            }
+            else if (!string.IsNullOrWhiteSpace(incrColumn))
             {
                 object? maxValue = await QueryMaxValueAsync(connection, schemaName, tableName, incrColumn, cancellationToken);
                 if (maxValue is not null && maxValue != DBNull.Value)
@@ -91,7 +113,7 @@ public sealed partial class SqlTransferService
             }
 
             tableState.IncrementalColumn = incrColumn;
-            tableState.LastBackupUtc = DateTime.UtcNow;
+            tableState.LastBackupUtc = tableRunStartedUtc;
             tableState.LastMode = isFull ? "FULL" : "INCR";
             tableState.TrackRowUpdates = tableDef.TrackRowUpdates;
             state.Tables[tableKey] = tableState;
@@ -104,6 +126,7 @@ public sealed partial class SqlTransferService
                 Description = tableDef.Description,
                 Category = tableDef.Category,
                 TrackRowUpdates = tableDef.TrackRowUpdates,
+                RowUpdateColumn = tableDef.TrackRowUpdates ? incrColumn : tableDef.RowUpdateColumn,
                 Mode = isFull ? "全量" : "增量",
                 Notes = notes,
                 RowCount = data.Rows.Count,
@@ -150,25 +173,8 @@ public sealed partial class SqlTransferService
         }
     }
 
-    private static string ResolveIncrementalColumn(DailyBackupRequest request, TableDefinition tableDefinition, TableBackupState tableState, IReadOnlyList<ColumnInfo> columns, ref string notes)
+    private static string ResolveIncrementalColumn(DailyBackupRequest request, TableBackupState tableState, IReadOnlyList<ColumnInfo> columns)
     {
-        if (tableDefinition.TrackRowUpdates)
-        {
-            string rowUpdateColumn = ResolveRowUpdateColumn(columns);
-            if (!string.IsNullOrWhiteSpace(rowUpdateColumn))
-            {
-                if (!string.IsNullOrWhiteSpace(request.IncrementalColumn) && !rowUpdateColumn.Equals(request.IncrementalColumn, StringComparison.OrdinalIgnoreCase))
-                {
-                    notes = $"已启用存量行更新，忽略全局增量字段 {request.IncrementalColumn}，改用表内更新时间字段 {rowUpdateColumn}。";
-                }
-
-                return rowUpdateColumn;
-            }
-
-            notes = "已启用存量行更新，但未识别到可用时间字段，本次退回全量导出。";
-            return string.Empty;
-        }
-
         if (!string.IsNullOrWhiteSpace(request.IncrementalColumn) && columns.Any(c => c.Name.Equals(request.IncrementalColumn, StringComparison.OrdinalIgnoreCase)))
         {
             return request.IncrementalColumn;
@@ -192,18 +198,48 @@ public sealed partial class SqlTransferService
         return columns.FirstOrDefault(c => c.IsIdentity)?.Name ?? string.Empty;
     }
 
-    private static string ResolveRowUpdateColumn(IReadOnlyList<ColumnInfo> columns)
+    private static List<string> ResolveRowUpdateColumns(DailyBackupRequest request, TableDefinition tableDefinition, TableBackupState tableState, IReadOnlyList<ColumnInfo> columns, ref string notes)
     {
-        string[] updateCandidates = ["UpdateTime", "UpdatedAt", "ModifyTime", "ModifiedAt", "LastUpdateTime", "LastUpdatedAt", "EditTime", "ModifiedOn", "UpdateDate"];
-        foreach (string candidate in updateCandidates)
+        if (!string.IsNullOrWhiteSpace(tableDefinition.RowUpdateColumn))
         {
-            ColumnInfo? match = columns.FirstOrDefault(c => c.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase) && IsTimeColumn(c));
-            if (match is not null)
+            ColumnInfo? explicitMatch = columns.FirstOrDefault(c => c.Name.Equals(tableDefinition.RowUpdateColumn, StringComparison.OrdinalIgnoreCase));
+            if (explicitMatch is null)
             {
-                return match.Name;
+                notes = $"Excel 指定的存量更新时间字段 {tableDefinition.RowUpdateColumn} 在数据库中不存在，本次继续自动识别。";
+            }
+            else if (!IsTimeColumn(explicitMatch))
+            {
+                notes = $"Excel 指定的存量更新时间字段 {tableDefinition.RowUpdateColumn} 不是时间类型，本次继续自动识别。";
+            }
+            else
+            {
+                return [explicitMatch.Name];
             }
         }
 
-        return string.Empty;
+        if (!string.IsNullOrWhiteSpace(request.IncrementalColumn))
+        {
+            ColumnInfo? globalMatch = columns.FirstOrDefault(c => c.Name.Equals(request.IncrementalColumn, StringComparison.OrdinalIgnoreCase) && IsTimeColumn(c));
+            if (globalMatch is not null)
+            {
+                notes = $"已启用存量行更新，使用全局增量字段 {globalMatch.Name} 作为时间判断字段。";
+                return [globalMatch.Name];
+            }
+        }
+
+        List<string> allTimeColumns = columns
+            .Where(IsTimeColumn)
+            .Select(c => c.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (allTimeColumns.Count > 0)
+        {
+            notes = $"已启用存量行更新，按上次采集时间匹配任意时间字段，使用字段: {string.Join(", ", allTimeColumns)}。";
+            return allTimeColumns;
+        }
+
+        notes = "已启用存量行更新，但未识别到可用时间字段，本次退回全量导出。";
+        return [];
     }
 }

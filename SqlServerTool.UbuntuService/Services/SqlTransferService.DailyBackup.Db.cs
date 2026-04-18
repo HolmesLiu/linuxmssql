@@ -8,6 +8,8 @@ namespace SqlServerTool.UbuntuService.Services;
 
 public sealed partial class SqlTransferService
 {
+    private static readonly Encoding CsvEncoding = Encoding.GetEncoding("GB18030");
+
     private async Task<List<ColumnInfo>> GetColumnsAsync(SqlConnection connection, string schemaName, string tableName, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -63,6 +65,33 @@ public sealed partial class SqlTransferService
         return table;
     }
 
+    private async Task<DataTable> LoadIncrementalRowsByTimeColumnsAsync(SqlConnection connection, string schemaName, string tableName, IReadOnlyList<string> timeColumns, DateTime thresholdUtc, CancellationToken cancellationToken)
+    {
+        if (timeColumns.Count == 0)
+        {
+            return new DataTable();
+        }
+
+        string qualified = $"{EscapeIdentifier(schemaName)}.{EscapeIdentifier(tableName)}";
+        string[] predicates = timeColumns
+            .Select((column, index) => $"{EscapeIdentifier(column)} IS NOT NULL AND {EscapeIdentifier(column)} > @watermark{index}")
+            .ToArray();
+
+        string orderBy = EscapeIdentifier(timeColumns[0]);
+        string sql = $"SELECT * FROM {qualified} WHERE {string.Join(" OR ", predicates)} ORDER BY {orderBy} ASC;";
+
+        await using SqlCommand cmd = new(sql, connection);
+        for (int index = 0; index < timeColumns.Count; index++)
+        {
+            cmd.Parameters.AddWithValue($"@watermark{index}", thresholdUtc);
+        }
+
+        await using SqlDataReader reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken);
+        DataTable table = new();
+        table.Load(reader);
+        return table;
+    }
+
     private static bool IsTimeColumn(ColumnInfo column)
     {
         string sqlType = column.SqlType.ToLowerInvariant();
@@ -106,7 +135,7 @@ public sealed partial class SqlTransferService
         if (f == "csv")
         {
             string path = Path.Combine(outputDirectory, $"{filePrefix}.csv");
-            await File.WriteAllTextAsync(path, BuildCsv(data), new UTF8Encoding(false), cancellationToken);
+            await File.WriteAllTextAsync(path, BuildCsv(data), CsvEncoding, cancellationToken);
             return 1;
         }
 

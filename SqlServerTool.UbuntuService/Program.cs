@@ -1,5 +1,8 @@
+using System.Text;
 using SqlServerTool.UbuntuService.Models;
 using SqlServerTool.UbuntuService.Services;
+
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<SqlTransferService>();
