@@ -62,6 +62,12 @@ public sealed partial class SqlTransferService
             bool isFull;
             DataTable data;
 
+            if (tableState.TrackRowUpdates != tableDef.TrackRowUpdates)
+            {
+                ResetTableState(tableState);
+                notes = $"检测到同步模式已切换为{(tableDef.TrackRowUpdates ? "存量行更新" : "普通增量")}，已自动清空旧水位，本次按全量重建。";
+            }
+
             if (tableDef.TrackRowUpdates)
             {
                 List<string> rowUpdateColumns = ResolveRowUpdateColumns(request, tableDef, tableState, columns, ref notes);
@@ -77,9 +83,25 @@ public sealed partial class SqlTransferService
                 incrColumn = ResolveIncrementalColumn(request, tableState, columns);
                 isFull = string.IsNullOrWhiteSpace(incrColumn) || string.IsNullOrWhiteSpace(tableState.Watermark);
 
-                data = isFull
-                    ? await LoadAllRowsAsync(connection, schemaName, tableName, cancellationToken)
-                    : await LoadIncrementalRowsAsync(connection, schemaName, tableName, incrColumn, tableState.Watermark, columns, request.FilterDataType, cancellationToken);
+                if (isFull)
+                {
+                    data = await LoadAllRowsAsync(connection, schemaName, tableName, cancellationToken);
+                }
+                else
+                {
+                    try
+                    {
+                        data = await LoadIncrementalRowsAsync(connection, schemaName, tableName, incrColumn, tableState.Watermark, columns, request.FilterDataType, cancellationToken);
+                    }
+                    catch (FormatException)
+                    {
+                        string invalidWatermark = tableState.Watermark;
+                        ResetTableState(tableState);
+                        isFull = true;
+                        notes = $"历史水位 {invalidWatermark} 与当前增量字段 {incrColumn} 类型不兼容，已自动退回全量重建。";
+                        data = await LoadAllRowsAsync(connection, schemaName, tableName, cancellationToken);
+                    }
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(notes))
@@ -196,6 +218,14 @@ public sealed partial class SqlTransferService
         }
 
         return columns.FirstOrDefault(c => c.IsIdentity)?.Name ?? string.Empty;
+    }
+
+    private static void ResetTableState(TableBackupState tableState)
+    {
+        tableState.IncrementalColumn = string.Empty;
+        tableState.Watermark = string.Empty;
+        tableState.LastBackupUtc = default;
+        tableState.LastMode = string.Empty;
     }
 
     private static List<string> ResolveRowUpdateColumns(DailyBackupRequest request, TableDefinition tableDefinition, TableBackupState tableState, IReadOnlyList<ColumnInfo> columns, ref string notes)
